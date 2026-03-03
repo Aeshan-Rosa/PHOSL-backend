@@ -27,15 +27,24 @@ public class BootstrapDataConfig {
                 return roleRepository.save(role);
             });
 
-            userRepository.findByUsername("admin").orElseGet(() -> {
-                User user = new User();
-                user.setUsername("admin");
-                user.setEmail("admin@phosl.local");
-                user.setPasswordHash(passwordEncoder.encode("admin123"));
-                user.setRoleId(adminRole.getId());
-                user.setIsActive(true);
-                return userRepository.save(user);
-            });
+            User adminUser = userRepository.findByUsername("admin")
+                    .or(() -> userRepository.findByEmail("admin@phosl.local"))
+                    .orElseGet(() -> {
+                        User user = new User();
+                        user.setUsername("admin");
+                        user.setEmail("admin@phosl.local");
+                        user.setRoleId(adminRole.getId());
+                        user.setIsActive(true);
+                        return user;
+                    });
+
+            // Keep dev credentials deterministic so frontend login always works.
+            adminUser.setUsername("admin");
+            adminUser.setEmail("admin@phosl.local");
+            adminUser.setPasswordHash(passwordEncoder.encode("admin123"));
+            adminUser.setRoleId(adminRole.getId());
+            adminUser.setIsActive(true);
+            userRepository.save(adminUser);
         };
     }
 }
