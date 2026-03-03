@@ -15,6 +15,9 @@
 
   <main class="app-shell">
     <section id="loginView" class="card login-card">
+      <div class="login-brand">
+        <img src="/assets/logo.png" alt="Piano House of Sri Lanka logo" class="brand-logo login-logo" />
+      </div>
       <h1>PHOSL Piano Management</h1>
       <p>Inventory, workers, suppliers, sales and reports in one place.</p>
       <form id="loginForm" class="grid-2">
@@ -34,11 +37,15 @@
 
     <section id="appView" class="hidden">
       <header class="topbar card">
-        <div>
+        <div class="topbar-brand">
+          <img src="/assets/logo.png" alt="Piano House of Sri Lanka logo" class="brand-logo" />
+          <div>
           <h2>Piano Management System</h2>
           <p id="userInfo">Not logged in</p>
+          </div>
         </div>
         <div class="topbar-actions">
+          <button id="themeToggle" class="btn">Dark Mode</button>
           <span id="activeRole" class="pill"></span>
           <button id="logoutBtn" class="btn">Logout</button>
         </div>

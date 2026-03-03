@@ -26,7 +26,23 @@ const views = [
   { id: "repairs", label: "Repairs", roles: ["ADMIN", "TECHNICIAN", "STAFF"] }
 ];
 
+const PIANO_STATUS_OPTIONS = ["IN_STOCK", "RESERVED", "SOLD", "UNDER_REPAIR"];
+const PIANO_TYPE_OPTIONS = ["Upright", "Courtage", "Boudoir", "Upright Grand"];
+const REQUIRED_PIANO_LOCATIONS = ["Main Warehouse", "Main Showroom", "Repair Shop"];
+
 const $ = (sel) => document.querySelector(sel);
+
+function setTheme(mode) {
+  const dark = mode === "dark";
+  document.body.classList.toggle("dark-mode", dark);
+  localStorage.setItem("phosl_theme", dark ? "dark" : "light");
+  const btn = $("#themeToggle");
+  if (btn) btn.textContent = dark ? "Light Mode" : "Dark Mode";
+}
+
+function toggleTheme() {
+  setTheme(document.body.classList.contains("dark-mode") ? "light" : "dark");
+}
 
 function status(message, isError = false) {
   const appVisible = !$("#appView").classList.contains("hidden");
@@ -158,6 +174,20 @@ async function bootstrapCommonData() {
   ]);
 }
 
+async function ensureRequiredPianoLocations() {
+  const existingNames = new Set(state.locations.map((l) => (l.name || "").trim().toLowerCase()));
+  const missing = REQUIRED_PIANO_LOCATIONS.filter((name) => !existingNames.has(name.toLowerCase()));
+  if (!missing.length) return;
+
+  for (const name of missing) {
+    await api("/api/locations", {
+      method: "POST",
+      body: JSON.stringify({ name, address: "", isActive: true })
+    });
+  }
+  state.locations = await api("/api/locations");
+}
+
 async function loadDashboard() {
   const section = $("#dashboard");
   const overview = await api("/api/dashboard/overview");
@@ -193,6 +223,7 @@ async function loadDashboard() {
 }
 
 async function loadPianos() {
+  await ensureRequiredPianoLocations();
   const section = $("#pianos");
   const inventorySummary = await api("/api/inventory/summary");
   const aging = await api("/api/inventory/aging");
@@ -209,10 +240,10 @@ async function loadPianos() {
     <form id="pianoFilterForm" class="grid-4">
       <label>Brand<input name="brand" /></label>
       <label>Status
-        <select name="status"><option value="">All</option><option>IN_STOCK</option><option>RESERVED</option><option>SOLD</option><option>UNDER_REPAIR</option></select>
+        <select name="status"><option value="">All</option>${PIANO_STATUS_OPTIONS.map((s) => `<option value="${s}">${s}</option>`).join("")}</select>
       </label>
       <label>Type
-        <select name="type"><option value="">All</option><option>Upright</option><option>Grand</option><option>Digital</option></select>
+        <select name="type"><option value="">All</option>${PIANO_TYPE_OPTIONS.map((t) => `<option value="${t}">${t}</option>`).join("")}</select>
       </label>
       <label>Search (serial/model/brand)<input name="q" /></label>
       <label>Min Price<input type="number" step="0.01" name="minPrice" /></label>
@@ -220,7 +251,7 @@ async function loadPianos() {
       <label>Location
         <select name="locationId">
           <option value="">All</option>
-          ${state.locations.map((l) => `<option value="${l.id}">${l.name}</option>`).join("")}
+          ${state.locations.filter((l) => REQUIRED_PIANO_LOCATIONS.includes(l.name)).map((l) => `<option value="${l.id}">${l.name}</option>`).join("")}
         </select>
       </label>
       <div><button class="btn" type="submit">Apply Filters</button></div>
@@ -232,17 +263,18 @@ async function loadPianos() {
       <label>Brand<input name="brand" required /></label>
       <label>Model<input name="model" /></label>
       <label>Serial Number<input name="serialNumber" /></label>
-      <label>Type<select name="pianoType"><option>Upright</option><option>Grand</option><option>Digital</option></select></label>
+      <label>Type<select name="pianoType">${PIANO_TYPE_OPTIONS.map((t) => `<option value="${t}">${t}</option>`).join("")}</select></label>
       <label>Color<input name="color" /></label>
       <label>Condition<select name="conditionType"><option>New</option><option>Used</option><option>Refurbished</option></select></label>
       <label>Year<input type="number" name="manufactureYear" /></label>
       <label>Selling Price<input type="number" step="0.01" name="expectedSellingPrice" /></label>
-      <label>Status<select name="status"><option>IN_STOCK</option><option>RESERVED</option><option>SOLD</option><option>UNDER_REPAIR</option></select></label>
-      <label>Location<select name="locationId">${state.locations.map((l) => `<option value="${l.id}">${l.name}</option>`).join("")}</select></label>
+      <label>Status<select name="status">${PIANO_STATUS_OPTIONS.map((s) => `<option value="${s}">${s}</option>`).join("")}</select></label>
+      <label>Location<select name="locationId">${state.locations.filter((l) => REQUIRED_PIANO_LOCATIONS.includes(l.name)).map((l) => `<option value="${l.id}">${l.name}</option>`).join("")}</select></label>
       <div><button class="btn primary" type="submit">Create Piano</button></div>
     </form>
 
     <div id="pianoTable"></div>
+    <div id="pianoEditPanel" class="hidden"></div>
 
     <div class="grid-2">
       <div>
@@ -272,13 +304,128 @@ async function loadPianos() {
       ? list.filter((p) => `${p.serialNumber || ""} ${p.model || ""} ${p.brand || ""}`.toLowerCase().includes(q))
       : list;
 
-    $("#pianoTable").innerHTML = table(
-      ["ID", "Code", "Brand", "Model", "Serial", "Type", "Condition", "Status", "Price", "Location"],
-      filtered.map((p) => {
-        const location = state.locations.find((l) => l.id === p.locationId)?.name || "-";
-        return [p.id, p.pianoCode || "-", p.brand, p.model || "-", p.serialNumber || "-", p.pianoType || "-", p.conditionType || "-", p.status, toCurrency(p.expectedSellingPrice), location];
-      })
-    );
+    const allowedLocations = state.locations.filter((l) => REQUIRED_PIANO_LOCATIONS.includes(l.name));
+    const rows = filtered.map((p) => {
+      return `<tr>
+        <td>${p.id}</td>
+        <td>${p.pianoCode || "-"}</td>
+        <td>${p.brand || "-"}</td>
+        <td>${p.model || "-"}</td>
+        <td>${p.serialNumber || "-"}</td>
+        <td>${p.pianoType || "-"}</td>
+        <td>${p.conditionType || "-"}</td>
+        <td>
+          <select class="piano-status-select" data-id="${p.id}">
+            ${PIANO_STATUS_OPTIONS.map((s) => `<option value="${s}" ${s === p.status ? "selected" : ""}>${s}</option>`).join("")}
+          </select>
+        </td>
+        <td>${toCurrency(p.expectedSellingPrice)}</td>
+        <td>
+          <select class="piano-location-select" data-id="${p.id}">
+            ${allowedLocations.map((l) => `<option value="${l.id}" ${l.id === p.locationId ? "selected" : ""}>${l.name}</option>`).join("")}
+          </select>
+        </td>
+        <td>
+          <button class="btn piano-edit-btn" data-id="${p.id}">Edit</button>
+          <button class="btn danger piano-delete-btn" data-id="${p.id}">Remove Piano</button>
+        </td>
+      </tr>`;
+    });
+
+    $("#pianoTable").innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Code</th>
+              <th>Brand</th>
+              <th>Model</th>
+              <th>Serial</th>
+              <th>Type</th>
+              <th>Condition</th>
+              <th>Status</th>
+              <th>Price</th>
+              <th>Location</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>${rows.length ? rows.join("") : `<tr><td colspan="11">No data</td></tr>`}</tbody>
+        </table>
+      </div>
+    `;
+
+    $("#pianoTable").querySelectorAll(".piano-status-select").forEach((el) => {
+      el.addEventListener("change", async () => {
+        await api(`/api/pianos/${el.dataset.id}/status${qs({ status: el.value })}`, { method: "PUT" });
+        status(`Piano #${el.dataset.id} status updated`);
+      });
+    });
+
+    $("#pianoTable").querySelectorAll(".piano-location-select").forEach((el) => {
+      el.addEventListener("change", async () => {
+        await api(`/api/pianos/${el.dataset.id}/transfer${qs({ locationId: el.value })}`, { method: "PUT" });
+        status(`Piano #${el.dataset.id} location updated`);
+      });
+    });
+
+    $("#pianoTable").querySelectorAll(".piano-delete-btn").forEach((el) => {
+      el.addEventListener("click", async () => {
+        await api(`/api/pianos/${el.dataset.id}`, { method: "DELETE" });
+        status(`Piano #${el.dataset.id} removed`);
+        await bootstrapCommonData();
+        await renderPianoTable(filter);
+      });
+    });
+
+    $("#pianoTable").querySelectorAll(".piano-edit-btn").forEach((el) => {
+      el.addEventListener("click", () => {
+        const piano = filtered.find((p) => String(p.id) === String(el.dataset.id));
+        if (!piano) return;
+
+        const allowedLocations = state.locations.filter((l) => REQUIRED_PIANO_LOCATIONS.includes(l.name));
+        $("#pianoEditPanel").classList.remove("hidden");
+        $("#pianoEditPanel").innerHTML = `
+          <h3>Edit Piano #${piano.id}</h3>
+          <form id="pianoEditForm" class="grid-4">
+            <label>Piano ID (Code)<input name="pianoCode" value="${piano.pianoCode || ""}" /></label>
+            <label>Brand<input name="brand" value="${piano.brand || ""}" required /></label>
+            <label>Model<input name="model" value="${piano.model || ""}" /></label>
+            <label>Serial Number<input name="serialNumber" value="${piano.serialNumber || ""}" /></label>
+            <label>Type<select name="pianoType">${PIANO_TYPE_OPTIONS.map((t) => `<option value="${t}" ${t === piano.pianoType ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+            <label>Color<input name="color" value="${piano.color || ""}" /></label>
+            <label>Condition<select name="conditionType">${["New", "Used", "Refurbished"].map((c) => `<option value="${c}" ${c === piano.conditionType ? "selected" : ""}>${c}</option>`).join("")}</select></label>
+            <label>Year<input type="number" name="manufactureYear" value="${piano.manufactureYear || ""}" /></label>
+            <label>Selling Price<input type="number" step="0.01" name="expectedSellingPrice" value="${piano.expectedSellingPrice || 0}" /></label>
+            <label>Status<select name="status">${PIANO_STATUS_OPTIONS.map((s) => `<option value="${s}" ${s === piano.status ? "selected" : ""}>${s}</option>`).join("")}</select></label>
+            <label>Location<select name="locationId">${allowedLocations.map((l) => `<option value="${l.id}" ${l.id === piano.locationId ? "selected" : ""}>${l.name}</option>`).join("")}</select></label>
+            <div>
+              <button class="btn primary" type="submit">Save Piano</button>
+              <button class="btn" type="button" id="cancelPianoEdit">Cancel</button>
+            </div>
+          </form>
+        `;
+
+        $("#cancelPianoEdit").addEventListener("click", () => {
+          $("#pianoEditPanel").classList.add("hidden");
+          $("#pianoEditPanel").innerHTML = "";
+        });
+
+        $("#pianoEditForm").addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const fd = Object.fromEntries(new FormData(e.target).entries());
+          fd.locationId = Number(fd.locationId);
+          fd.manufactureYear = fd.manufactureYear ? Number(fd.manufactureYear) : null;
+          fd.expectedSellingPrice = Number(fd.expectedSellingPrice || 0);
+          await api(`/api/pianos/${piano.id}`, { method: "PUT", body: JSON.stringify(fd) });
+          status(`Piano #${piano.id} updated`);
+          await bootstrapCommonData();
+          await renderPianoTable(filter);
+          $("#pianoEditPanel").classList.add("hidden");
+          $("#pianoEditPanel").innerHTML = "";
+        });
+      });
+    });
   };
 
   await renderPianoTable();
@@ -323,6 +470,7 @@ async function loadPianos() {
 async function loadWorkers() {
   const section = $("#workers");
   const now = new Date();
+  const today = now.toISOString().slice(0, 10);
   const payouts = await api(`/api/worker-payouts${qs({ year: now.getFullYear(), month: now.getMonth() + 1 })}`);
 
   section.innerHTML = `
@@ -335,41 +483,71 @@ async function loadWorkers() {
       </label>
       <label>Phone<input name="phone" /></label>
       <label>Email<input name="email" type="email" /></label>
-      <label>Base Salary<input type="number" step="0.01" name="baseSalary" /></label>
-      <label>Commission %<input type="number" step="0.01" name="commissionRate" /></label>
+      <label>Base Salary (Per Day)<input type="number" step="0.01" name="baseSalary" /></label>
       <label>Date Joined<input type="date" name="joinedDate" /></label>
       <div><button class="btn primary" type="submit">Add Worker</button></div>
     </form>
 
     <h3>Employees</h3>
-    ${table(
-      ["ID", "Employee ID", "Name", "Role", "Contact", "Salary", "Commission %", "Joined", "Status"],
-      state.workers.map((w) => [
-        w.id,
-        w.employeeCode || "-",
-        w.fullName,
-        state.workerRoles.find((r) => r.id === w.roleId)?.roleName || w.roleId,
-        `${w.phone || ""} ${w.email || ""}`.trim() || "-",
-        toCurrency(w.baseSalary),
-        `${w.commissionRate || 0}%`,
-        fmtDate(w.joinedDate),
-        w.isActive ? "Active" : "Disabled"
-      ])
-    )}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Employee ID</th>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Contact</th>
+            <th>Base Salary / Day</th>
+            <th>Joined</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${state.workers.map((w) => `
+            <tr>
+              <td>${w.id}</td>
+              <td>${w.employeeCode || "-"}</td>
+              <td>${w.fullName}</td>
+              <td>${state.workerRoles.find((r) => r.id === w.roleId)?.roleName || w.roleId}</td>
+              <td>${`${w.phone || ""} ${w.email || ""}`.trim() || "-"}</td>
+              <td>${toCurrency(w.baseSalary)}</td>
+              <td>${fmtDate(w.joinedDate)}</td>
+              <td>${w.isActive ? "Active" : "Disabled"}</td>
+              <td>
+                <button class="btn worker-edit-btn" data-id="${w.id}">Edit</button>
+                <button class="btn ${w.isActive ? "warn" : ""} worker-toggle-btn" data-id="${w.id}" data-active="${w.isActive ? "1" : "0"}">${w.isActive ? "Disable" : "Enable"}</button>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
 
-    <h3>Payment Records (Current Month)</h3>
-    ${table(["Worker ID", "Type", "Amount", "Date"], payouts.map((p) => [p.workerId, p.payoutType, toCurrency(p.amount), fmtDate(p.payoutDate)]))}
+    <div id="workerEditPanel" class="hidden"></div>
 
-    <h3>Add Salary/Commission Payout</h3>
+    <h3>Salary Payout (Daily)</h3>
     <form id="workerPayoutForm" class="grid-4">
-      <label>Worker<select name="workerId">${state.workers.map((w) => `<option value="${w.id}">${w.fullName}</option>`).join("")}</select></label>
-      <label>Year<input type="number" name="periodYear" value="${now.getFullYear()}" /></label>
-      <label>Month<input type="number" min="1" max="12" name="periodMonth" value="${now.getMonth() + 1}" /></label>
-      <label>Type<select name="payoutType"><option>SALARY</option><option>COMMISSION</option><option>BONUS</option><option>DEDUCTION</option></select></label>
-      <label>Amount<input type="number" step="0.01" name="amount" /></label>
-      <label>Payout Date<input type="date" name="payoutDate" /></label>
-      <div><button class="btn" type="submit">Record Payout</button></div>
+      <label>Worker<select name="workerId" id="payoutWorkerId">${state.workers.map((w) => `<option value="${w.id}" data-salary="${w.baseSalary || 0}">${w.fullName}</option>`).join("")}</select></label>
+      <label>Payout Date<input type="date" name="payoutDate" id="payoutDate" value="${today}" required /></label>
+      <label>Base Salary (Per Day)<input type="number" step="0.01" name="baseSalaryPerDay" id="baseSalaryPerDay" /></label>
+      <label>Previous Payments in Advance<input type="number" step="0.01" name="previousAdvance" id="previousAdvance" readonly /></label>
+      <label>Additional Amounts (Incentives)<input type="number" step="0.01" name="additionalAmount" id="additionalAmount" value="0" /></label>
+      <label>Total Salary Payout<input type="number" step="0.01" name="totalAmount" id="totalAmount" readonly /></label>
+      <div><button class="btn" type="submit">Record Salary Payout</button></div>
     </form>
+
+    <h3>Record Previous Advance Payment</h3>
+    <form id="workerAdvanceForm" class="grid-4">
+      <label>Worker<select name="workerId">${state.workers.map((w) => `<option value="${w.id}">${w.fullName}</option>`).join("")}</select></label>
+      <label>Advance Date<input type="date" name="payoutDate" value="${today}" required /></label>
+      <label>Advance Amount<input type="number" step="0.01" name="amount" required /></label>
+      <div><button class="btn" type="submit">Save Advance</button></div>
+    </form>
+
+    <h3>Previous Payments (Current Month)</h3>
+    ${table(["Worker ID", "Type", "Amount", "Date"], payouts.map((p) => [p.workerId, p.payoutType, toCurrency(p.amount), fmtDate(p.payoutDate)]))}
   `;
 
   $("#workerCreateForm").addEventListener("submit", async (e) => {
@@ -377,22 +555,128 @@ async function loadWorkers() {
     const fd = Object.fromEntries(new FormData(e.target).entries());
     fd.roleId = Number(fd.roleId);
     fd.baseSalary = Number(fd.baseSalary || 0);
-    fd.commissionRate = Number(fd.commissionRate || 0);
+    fd.commissionRate = 0;
     await api("/api/workers", { method: "POST", body: JSON.stringify(fd) });
     status("Worker added");
     await bootstrapCommonData();
     await loadWorkers();
   });
 
+  section.querySelectorAll(".worker-toggle-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      const isActive = btn.dataset.active === "1";
+      await api(`/api/workers/${id}/${isActive ? "disable" : "enable"}`, { method: "PUT" });
+      status(`Worker #${id} ${isActive ? "disabled" : "enabled"}`);
+      await bootstrapCommonData();
+      await loadWorkers();
+    });
+  });
+
+  section.querySelectorAll(".worker-edit-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const worker = state.workers.find((w) => String(w.id) === String(btn.dataset.id));
+      if (!worker) return;
+      const panel = $("#workerEditPanel");
+      panel.classList.remove("hidden");
+      panel.innerHTML = `
+        <h3>Edit Worker #${worker.id}</h3>
+        <form id="workerEditForm" class="grid-4">
+          <label>Employee ID<input name="employeeCode" value="${worker.employeeCode || ""}" /></label>
+          <label>Name<input name="fullName" value="${worker.fullName || ""}" required /></label>
+          <label>Role<select name="roleId">${state.workerRoles.map((r) => `<option value="${r.id}" ${r.id === worker.roleId ? "selected" : ""}>${r.roleName}</option>`).join("")}</select></label>
+          <label>Phone<input name="phone" value="${worker.phone || ""}" /></label>
+          <label>Email<input name="email" type="email" value="${worker.email || ""}" /></label>
+          <label>Base Salary (Per Day)<input type="number" step="0.01" name="baseSalary" value="${worker.baseSalary || 0}" /></label>
+          <label>Date Joined<input type="date" name="joinedDate" value="${worker.joinedDate || ""}" /></label>
+          <div>
+            <button class="btn primary" type="submit">Save Worker</button>
+            <button class="btn" type="button" id="cancelWorkerEdit">Cancel</button>
+          </div>
+        </form>
+      `;
+
+      $("#cancelWorkerEdit").addEventListener("click", () => {
+        panel.classList.add("hidden");
+        panel.innerHTML = "";
+      });
+
+      $("#workerEditForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fd = Object.fromEntries(new FormData(e.target).entries());
+        fd.roleId = Number(fd.roleId);
+        fd.baseSalary = Number(fd.baseSalary || 0);
+        fd.commissionRate = 0;
+        await api(`/api/workers/${worker.id}`, { method: "PUT", body: JSON.stringify(fd) });
+        status(`Worker #${worker.id} updated`);
+        await bootstrapCommonData();
+        await loadWorkers();
+      });
+    });
+  });
+
+  const payoutWorkerId = $("#payoutWorkerId");
+  const payoutDate = $("#payoutDate");
+  const baseSalaryPerDay = $("#baseSalaryPerDay");
+  const previousAdvance = $("#previousAdvance");
+  const additionalAmount = $("#additionalAmount");
+  const totalAmount = $("#totalAmount");
+
+  const calcSalaryPayout = () => {
+    const workerId = Number(payoutWorkerId.value);
+    const worker = state.workers.find((w) => w.id === workerId);
+    if (worker && (!baseSalaryPerDay.value || Number(baseSalaryPerDay.value) === 0)) {
+      baseSalaryPerDay.value = Number(worker.baseSalary || 0);
+    }
+
+    const selectedDate = payoutDate.value || today;
+    const adv = payouts
+      .filter((p) => p.workerId === workerId && String(p.payoutType || "").toUpperCase() === "ADVANCE" && p.payoutDate <= selectedDate)
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    previousAdvance.value = adv.toFixed(2);
+
+    const base = Number(baseSalaryPerDay.value || 0);
+    const add = Number(additionalAmount.value || 0);
+    const total = base + add - adv;
+    totalAmount.value = Math.max(total, 0).toFixed(2);
+  };
+
+  payoutWorkerId.addEventListener("change", calcSalaryPayout);
+  payoutDate.addEventListener("change", calcSalaryPayout);
+  baseSalaryPerDay.addEventListener("input", calcSalaryPayout);
+  additionalAmount.addEventListener("input", calcSalaryPayout);
+  calcSalaryPayout();
+
   $("#workerPayoutForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(e.target).entries());
     fd.workerId = Number(fd.workerId);
-    fd.periodYear = Number(fd.periodYear);
-    fd.periodMonth = Number(fd.periodMonth);
-    fd.amount = Number(fd.amount || 0);
+    fd.payoutDate = fd.payoutDate || today;
+    const payoutD = new Date(fd.payoutDate);
+    fd.periodYear = payoutD.getFullYear();
+    fd.periodMonth = payoutD.getMonth() + 1;
+    fd.payoutType = "SALARY";
+    fd.amount = Number(fd.totalAmount || 0);
+    delete fd.baseSalaryPerDay;
+    delete fd.previousAdvance;
+    delete fd.additionalAmount;
+    delete fd.totalAmount;
     await api("/api/worker-payouts", { method: "POST", body: JSON.stringify(fd) });
-    status("Payout recorded");
+    status("Daily salary payout recorded");
+    await loadWorkers();
+  });
+
+  $("#workerAdvanceForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(e.target).entries());
+    fd.workerId = Number(fd.workerId);
+    fd.amount = Number(fd.amount || 0);
+    fd.payoutType = "ADVANCE";
+    const d = new Date(fd.payoutDate);
+    fd.periodYear = d.getFullYear();
+    fd.periodMonth = d.getMonth() + 1;
+    await api("/api/worker-payouts", { method: "POST", body: JSON.stringify(fd) });
+    status("Advance payment saved");
     await loadWorkers();
   });
 }
@@ -863,6 +1147,10 @@ function onLogout() {
 }
 
 async function init() {
+  setTheme(localStorage.getItem("phosl_theme") || "light");
+  const themeBtn = $("#themeToggle");
+  if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
+
   $("#loginForm").addEventListener("submit", onLogin);
   $("#logoutBtn").addEventListener("click", onLogout);
 

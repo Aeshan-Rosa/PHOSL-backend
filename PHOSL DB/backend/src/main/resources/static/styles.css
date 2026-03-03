@@ -63,6 +63,12 @@ body {
   margin: 10vh auto;
 }
 
+.login-brand {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
 .login-card h1 {
   margin: 0;
   font-size: 1.9rem;
@@ -141,6 +147,25 @@ button {
   align-items: center;
   gap: 16px;
   margin-bottom: 14px;
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-logo {
+  width: 74px;
+  height: 74px;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 2px solid rgba(27, 60, 83, 0.16);
+}
+
+.login-logo {
+  width: 96px;
+  height: 96px;
 }
 
 .topbar-actions {
@@ -296,4 +321,45 @@ th {
     flex-direction: column;
     align-items: flex-start;
   }
+
+  .topbar-brand {
+    align-items: flex-start;
+  }
+}
+
+body.dark-mode {
+  background: #0f1822;
+  color: #f9f3ef;
+}
+
+body.dark-mode .card {
+  background: #1b2b3a;
+  border-color: rgba(210, 193, 182, 0.2);
+  box-shadow: 0 14px 35px rgba(0, 0, 0, 0.45);
+}
+
+body.dark-mode th {
+  background: rgba(210, 193, 182, 0.16);
+  color: #f9f3ef;
+}
+
+body.dark-mode td {
+  border-bottom-color: rgba(210, 193, 182, 0.14);
+}
+
+body.dark-mode input,
+body.dark-mode select,
+body.dark-mode textarea {
+  background: #23374a;
+  color: #f9f3ef;
+  border-color: rgba(210, 193, 182, 0.38);
+}
+
+body.dark-mode .btn {
+  background: rgba(210, 193, 182, 0.22);
+  color: #f9f3ef;
+}
+
+body.dark-mode .btn.primary {
+  background: #456882;
 }
